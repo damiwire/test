@@ -1,0 +1,675 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "id": "turkish-worker",
+   "metadata": {},
+   "source": [
+    "4-7. 프로젝트: 멋진 작사가 만들기\n",
+    "======"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "statistical-democracy",
+   "metadata": {},
+   "source": [
+    "Step 1. 데이터 다운로드\n",
+    "-------"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "id": "centered-promise",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "데이터 크기: 187088\n",
+      "Examples:\n",
+      " [' There must be some kind of way outta here', 'Said the joker to the thief', \"There's too much confusion\"]\n"
+     ]
+    }
+   ],
+   "source": [
+    "import re    \n",
+    "import glob        \n",
+    "import os\n",
+    "import tensorflow as tf\n",
+    "\n",
+    "\n",
+    "txt_file_path = os.getenv('HOME')+'/aiffel/lyricist/data/lyrics/*'\n",
+    "\n",
+    "txt_list = glob.glob(txt_file_path)\n",
+    "\n",
+    "raw_corpus = []\n",
+    "\n",
+    "# 여러개의 txt 파일을 모두 읽어서 raw_corpus 에 담습니다.\n",
+    "for txt_file in txt_list:\n",
+    "    with open(txt_file, \"r\") as f:\n",
+    "        raw = f.read().splitlines()\n",
+    "        raw_corpus.extend(raw)\n",
+    "\n",
+    "print(\"데이터 크기:\", len(raw_corpus))\n",
+    "print(\"Examples:\\n\", raw_corpus[:3])"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "unauthorized-hacker",
+   "metadata": {},
+   "source": [
+    "Step 3. 데이터 정제\n",
+    "-----"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "incomplete-bikini",
+   "metadata": {},
+   "source": [
+    "- preprocess_sentence 함수 사용"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "id": "sonic-rotation",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "<start> this is sample sentence . <end>\n"
+     ]
+    }
+   ],
+   "source": [
+    "def preprocess_sentence(sentence):\n",
+    "    sentence = sentence.lower().strip() # 1\n",
+    "    sentence = re.sub(r\"([?.!,¿])\", r\" \\1 \", sentence) # 2\n",
+    "    sentence = re.sub(r'[\" \"]+', \" \", sentence) # 3\n",
+    "    sentence = re.sub(r\"[^a-zA-Z?.!,¿]+\", \" \", sentence) # 4\n",
+    "    sentence = sentence.strip() # 5\n",
+    "    sentence = '<start> ' + sentence + ' <end>' # 6\n",
+    "    return sentence\n",
+    "\n",
+    "# 이 문장이 어떻게 필터링되는지 확인해 보세요.\n",
+    "print(preprocess_sentence(\"This @_is ;;;sample        sentence.\"))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "id": "synthetic-supervision",
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "['<start> there must be some kind of way outta here <end>',\n",
+       " '<start> said the joker to the thief <end>',\n",
+       " '<start> there s too much confusion <end>',\n",
+       " '<start> i can t get no relief business men , they drink my wine <end>',\n",
+       " '<start> plowman dig my earth <end>',\n",
+       " '<start> none were level on the mind <end>',\n",
+       " '<start> nobody up at his word <end>',\n",
+       " '<start> hey , hey no reason to get excited <end>',\n",
+       " '<start> the thief he kindly spoke <end>',\n",
+       " '<start> there are many here among us <end>']"
+      ]
+     },
+     "execution_count": 3,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "corpus = []\n",
+    "\n",
+    "for sentence in raw_corpus:\n",
+    "    # 우리가 원하지 않는 문장은 건너뜁니다\n",
+    "    if len(sentence) == 0: continue\n",
+    "    if len(sentence) > 55: continue\n",
+    "    if sentence[-1] == \":\": continue\n",
+    "    \n",
+    "    # 정제를 하고 담아주세요\n",
+    "    preprocessed_sentence = preprocess_sentence(sentence)\n",
+    "    corpus.append(preprocessed_sentence)\n",
+    "        \n",
+    "# 정제된 결과를 10개만 확인해보죠\n",
+    "corpus[:10]"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "objective-billion",
+   "metadata": {},
+   "source": [
+    "- 예제대로 문장을 토큰화 했을 때 토큰의 개수가 15개를 넘어가는 문장을 학습 데이터에서 제외해야하므로<br/> maxlen을 추가한다."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "id": "trained-saskatchewan",
+   "metadata": {
+    "scrolled": true
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "[[  2  66 273 ...   0   0   0]\n",
+      " [  2 116   6 ...   0   0   0]\n",
+      " [  2  66  16 ...   0   0   0]\n",
+      " ...\n",
+      " [  2  78  48 ...   3   0   0]\n",
+      " [  2  49   4 ...   0   0   0]\n",
+      " [  2  13 645 ...   0   0   0]] <keras_preprocessing.text.Tokenizer object at 0x7f5179b17f10>\n"
+     ]
+    }
+   ],
+   "source": [
+    "def tokenize(corpus):\n",
+    "\n",
+    "    tokenizer = tf.keras.preprocessing.text.Tokenizer(\n",
+    "        num_words=12000, \n",
+    "        filters=' ',\n",
+    "        oov_token=\"<unk>\"\n",
+    "    )\n",
+    "    # corpus를 이용해 tokenizer 내부의 단어장을 완성합니다\n",
+    "    tokenizer.fit_on_texts(corpus)\n",
+    "    # 준비한 tokenizer를 이용해 corpus를 Tensor로 변환합니다\n",
+    "    tensor = tokenizer.texts_to_sequences(corpus)   \n",
+    "    # 입력 데이터의 시퀀스 길이를 일정하게 맞춰줍니다\n",
+    "    # 만약 시퀀스가 짧다면 문장 뒤에 패딩을 붙여 길이를 맞춰줍니다.\n",
+    "    # 문장 앞에 패딩을 붙여 길이를 맞추고 싶다면 padding='pre'를 사용합니다\n",
+    "    tensor = tf.keras.preprocessing.sequence.pad_sequences(tensor, padding='post', maxlen=15)  \n",
+    "    \n",
+    "    print(tensor,tokenizer)\n",
+    "    return tensor, tokenizer\n",
+    "\n",
+    "tensor, tokenizer = tokenize(corpus)\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "earned-citation",
+   "metadata": {},
+   "source": [
+    "- tokenizer에 구축된 단어 사전의 인덱스 확인"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 5,
+   "id": "religious-pierce",
+   "metadata": {
+    "scrolled": true
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "1 : <unk>\n",
+      "2 : <start>\n",
+      "3 : <end>\n",
+      "4 : ,\n",
+      "5 : i\n",
+      "6 : the\n",
+      "7 : you\n",
+      "8 : and\n",
+      "9 : a\n",
+      "10 : to\n"
+     ]
+    }
+   ],
+   "source": [
+    "for idx in tokenizer.index_word:\n",
+    "    print(idx, \":\", tokenizer.index_word[idx])\n",
+    "\n",
+    "    if idx >= 10: break"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 6,
+   "id": "frank-disposition",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "[  2  66 273  27  97 527  20  87 752  91   3   0   0   0]\n",
+      "[ 66 273  27  97 527  20  87 752  91   3   0   0   0   0]\n"
+     ]
+    }
+   ],
+   "source": [
+    "src_input = tensor[:, :-1]  # tensor에서 마지막 토큰을 잘라내서 소스 문장을 생성합니다. 마지막 토큰은 <end>가 아니라 <pad>일 가능성이 높습니다.\n",
+    "tgt_input = tensor[:, 1:]    # tensor에서 <start>를 잘라내서 타겟 문장을 생성합니다.\n",
+    "\n",
+    "print(src_input[0])\n",
+    "print(tgt_input[0])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 7,
+   "id": "departmental-mississippi",
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "<BatchDataset shapes: ((256, 14), (256, 14)), types: (tf.int32, tf.int32)>"
+      ]
+     },
+     "execution_count": 7,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "BUFFER_SIZE = len(src_input)\n",
+    "BATCH_SIZE = 256\n",
+    "steps_per_epoch = len(src_input) // BATCH_SIZE\n",
+    "\n",
+    "VOCAB_SIZE = tokenizer.num_words + 1   \n",
+    "\n",
+    "dataset = tf.data.Dataset.from_tensor_slices((src_input, tgt_input))\n",
+    "dataset = dataset.shuffle(BUFFER_SIZE)\n",
+    "dataset = dataset.batch(BATCH_SIZE, drop_remainder=True)\n",
+    "dataset"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "rural-campus",
+   "metadata": {},
+   "source": [
+    "Step 4. 평가 데이터셋 분리\n",
+    "-------"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 8,
+   "id": "fabulous-paint",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Source Train: (121872, 14)\n",
+      "Target Train: (121872, 14)\n"
+     ]
+    }
+   ],
+   "source": [
+    "from sklearn.model_selection import train_test_split\n",
+    "\n",
+    "#train_test_split을 사용하여 훈련데이터 평가데이터 분리\n",
+    "enc_train, enc_val, dec_train, dec_val = train_test_split(src_input,\n",
+    "                                                          tgt_input,\n",
+    "                                                          test_size=0.2,\n",
+    "                                                          shuffle=True)\n",
+    "\n",
+    "print(\"Source Train:\", enc_train.shape)\n",
+    "print(\"Target Train:\", dec_train.shape)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "psychological-trailer",
+   "metadata": {},
+   "source": [
+    "Step 5. 인공지능 만들기\n",
+    "-----"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 9,
+   "id": "expressed-camping",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "class TextGenerator(tf.keras.Model):\n",
+    "    def __init__(self, vocab_size, embedding_size, hidden_size):\n",
+    "        super().__init__()\n",
+    "        \n",
+    "        self.embedding = tf.keras.layers.Embedding(vocab_size, embedding_size)\n",
+    "        self.rnn_1 = tf.keras.layers.LSTM(hidden_size, return_sequences=True)\n",
+    "        self.rnn_2 = tf.keras.layers.LSTM(hidden_size, return_sequences=True)\n",
+    "        self.linear = tf.keras.layers.Dense(vocab_size)\n",
+    "        \n",
+    "    def call(self, x):\n",
+    "        out = self.embedding(x)\n",
+    "        out = self.rnn_1(out)\n",
+    "        out = self.rnn_2(out)\n",
+    "        out = self.linear(out)\n",
+    "        \n",
+    "        return out\n",
+    "    \n",
+    "embedding_size = 256\n",
+    "hidden_size = 1024\n",
+    "model = TextGenerator(tokenizer.num_words + 1, embedding_size , hidden_size)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 10,
+   "id": "binding-belfast",
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "<tf.Tensor: shape=(256, 14, 12001), dtype=float32, numpy=\n",
+       "array([[[-9.86974337e-05, -1.31180568e-04,  4.37430026e-05, ...,\n",
+       "         -1.69484381e-04,  1.99337621e-04,  1.54291865e-05],\n",
+       "        [-1.20065677e-04, -3.48770263e-04, -2.11105376e-04, ...,\n",
+       "         -4.84154065e-04,  4.12041234e-04,  5.41650334e-05],\n",
+       "        [-1.11149799e-04, -3.57669865e-04, -4.25909355e-04, ...,\n",
+       "         -6.95360242e-04,  1.72066546e-04, -6.50873553e-05],\n",
+       "        ...,\n",
+       "        [ 2.94463443e-05,  4.89068159e-04,  2.98490777e-04, ...,\n",
+       "         -4.95080021e-04,  7.89958693e-04, -4.13184433e-04],\n",
+       "        [ 2.35295171e-04,  5.31028374e-04,  9.77130694e-05, ...,\n",
+       "         -5.67091687e-04,  7.93782179e-04, -2.67972762e-04],\n",
+       "        [ 5.66450588e-04,  6.26684108e-04, -2.42318856e-04, ...,\n",
+       "         -5.55676757e-04,  6.46272558e-04, -1.01168676e-04]],\n",
+       "\n",
+       "       [[-9.86974337e-05, -1.31180568e-04,  4.37430026e-05, ...,\n",
+       "         -1.69484381e-04,  1.99337621e-04,  1.54291865e-05],\n",
+       "        [-1.22808837e-04, -5.38781296e-06,  6.87286665e-05, ...,\n",
+       "         -3.97737225e-04,  4.36268310e-04,  4.45066598e-06],\n",
+       "        [-2.65748560e-04,  1.91248633e-04,  3.09630152e-04, ...,\n",
+       "         -4.13308007e-04,  5.66219038e-04, -1.18826365e-05],\n",
+       "        ...,\n",
+       "        [-9.32424795e-04, -3.56093253e-04,  2.72340199e-04, ...,\n",
+       "         -3.29075701e-04,  3.07642273e-04, -4.36811533e-04],\n",
+       "        [-5.48146025e-04, -2.71222205e-04,  1.92598236e-04, ...,\n",
+       "         -2.15801454e-04,  3.19357932e-04, -3.21429980e-04],\n",
+       "        [-3.24080065e-05, -8.28840930e-05, -4.85289856e-05, ...,\n",
+       "         -6.71515154e-05,  2.16345667e-04, -2.12205690e-04]],\n",
+       "\n",
+       "       [[-9.86974337e-05, -1.31180568e-04,  4.37430026e-05, ...,\n",
+       "         -1.69484381e-04,  1.99337621e-04,  1.54291865e-05],\n",
+       "        [-1.70505649e-04, -7.27804727e-05,  1.56842689e-05, ...,\n",
+       "         -3.51467315e-04,  3.64330801e-04,  1.09175671e-04],\n",
+       "        [ 2.07911489e-05,  1.21195408e-04, -7.40086543e-05, ...,\n",
+       "         -5.41433983e-04,  4.85719094e-04,  3.09455587e-04],\n",
+       "        ...,\n",
+       "        [ 1.48864312e-03,  1.47885876e-04,  6.53369119e-04, ...,\n",
+       "         -8.01762915e-04,  1.06939573e-04,  1.01283724e-04],\n",
+       "        [ 1.78446935e-03,  2.62283022e-04,  2.93266959e-04, ...,\n",
+       "         -7.38257193e-04, -1.65982085e-04,  1.51401720e-04],\n",
+       "        [ 2.05613649e-03,  4.26042418e-04, -8.43713133e-05, ...,\n",
+       "         -6.65515312e-04, -4.80831746e-04,  1.79865034e-04]],\n",
+       "\n",
+       "       ...,\n",
+       "\n",
+       "       [[-9.86974337e-05, -1.31180568e-04,  4.37430026e-05, ...,\n",
+       "         -1.69484381e-04,  1.99337621e-04,  1.54291865e-05],\n",
+       "        [-1.21231504e-04, -3.57152807e-04,  5.05161079e-05, ...,\n",
+       "         -1.68539278e-04,  3.70849215e-04, -3.45746303e-05],\n",
+       "        [-2.44389725e-04, -1.80508796e-04, -8.44343012e-05, ...,\n",
+       "         -1.31919631e-04,  3.18698614e-04, -2.07858466e-04],\n",
+       "        ...,\n",
+       "        [-1.77243724e-04,  2.66008021e-04, -1.28561421e-03, ...,\n",
+       "         -9.22042178e-04, -5.99311432e-04,  2.23975803e-04],\n",
+       "        [ 3.48295260e-04,  4.22322395e-04, -1.51970983e-03, ...,\n",
+       "         -7.83721800e-04, -7.10670836e-04,  2.29380836e-04],\n",
+       "        [ 8.80278239e-04,  6.50982140e-04, -1.76162808e-03, ...,\n",
+       "         -6.23921631e-04, -8.73385288e-04,  2.12484170e-04]],\n",
+       "\n",
+       "       [[-9.86974337e-05, -1.31180568e-04,  4.37430026e-05, ...,\n",
+       "         -1.69484381e-04,  1.99337621e-04,  1.54291865e-05],\n",
+       "        [ 2.14913453e-05,  3.89369889e-05, -1.03485381e-05, ...,\n",
+       "         -3.98504868e-04,  3.53157258e-04, -6.09482486e-05],\n",
+       "        [ 1.48942228e-04,  4.31466702e-04, -7.69252511e-05, ...,\n",
+       "         -6.43899140e-04,  5.42304944e-04, -2.55275168e-04],\n",
+       "        ...,\n",
+       "        [ 1.22124702e-03, -1.51735439e-04, -1.49251032e-03, ...,\n",
+       "         -1.00380136e-03, -5.76280523e-04,  8.76623817e-05],\n",
+       "        [ 1.58982468e-03,  1.19821736e-04, -1.70374790e-03, ...,\n",
+       "         -8.91525706e-04, -6.64032588e-04,  1.55920046e-04],\n",
+       "        [ 1.92310801e-03,  4.16141091e-04, -1.89508777e-03, ...,\n",
+       "         -7.50779291e-04, -8.04577488e-04,  2.15710315e-04]],\n",
+       "\n",
+       "       [[-9.86974337e-05, -1.31180568e-04,  4.37430026e-05, ...,\n",
+       "         -1.69484381e-04,  1.99337621e-04,  1.54291865e-05],\n",
+       "        [-2.14892338e-04, -2.89263524e-04, -2.17362285e-05, ...,\n",
+       "         -1.90856605e-04,  3.19284998e-04,  1.65613339e-04],\n",
+       "        [-3.09585710e-04, -2.51130521e-04, -4.79149021e-05, ...,\n",
+       "         -2.07989462e-04,  2.45611882e-04,  1.87520382e-05],\n",
+       "        ...,\n",
+       "        [-4.87225698e-05, -4.15429415e-04, -1.12422497e-03, ...,\n",
+       "         -6.24737804e-05,  1.32524909e-03, -3.65407323e-05],\n",
+       "        [ 1.51053930e-04, -2.12268948e-04, -1.17093406e-03, ...,\n",
+       "         -2.38998371e-04,  1.23615097e-03, -6.07177244e-05],\n",
+       "        [ 4.94721578e-04,  6.25203320e-05, -1.33220793e-03, ...,\n",
+       "         -2.77398678e-04,  1.02185376e-03, -7.51608823e-05]]],\n",
+       "      dtype=float32)>"
+      ]
+     },
+     "execution_count": 10,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "# 데이터셋에서 데이터 한 배치만 불러오는 방법입니다.\n",
+    "# 지금은 동작 원리에 너무 빠져들지 마세요~\n",
+    "for src_sample, tgt_sample in dataset.take(1): break\n",
+    "\n",
+    "# 한 배치만 불러온 데이터를 모델에 넣어봅니다\n",
+    "model(src_sample)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 11,
+   "id": "shaped-newspaper",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Model: \"text_generator\"\n",
+      "_________________________________________________________________\n",
+      "Layer (type)                 Output Shape              Param #   \n",
+      "=================================================================\n",
+      "embedding (Embedding)        multiple                  3072256   \n",
+      "_________________________________________________________________\n",
+      "lstm (LSTM)                  multiple                  5246976   \n",
+      "_________________________________________________________________\n",
+      "lstm_1 (LSTM)                multiple                  8392704   \n",
+      "_________________________________________________________________\n",
+      "dense (Dense)                multiple                  12301025  \n",
+      "=================================================================\n",
+      "Total params: 29,012,961\n",
+      "Trainable params: 29,012,961\n",
+      "Non-trainable params: 0\n",
+      "_________________________________________________________________\n"
+     ]
+    }
+   ],
+   "source": [
+    "model.summary()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 12,
+   "id": "plain-series",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Epoch 1/10\n",
+      "595/595 [==============================] - 195s 323ms/step - loss: 3.8445\n",
+      "Epoch 2/10\n",
+      "595/595 [==============================] - 193s 324ms/step - loss: 2.9346\n",
+      "Epoch 3/10\n",
+      "595/595 [==============================] - 193s 325ms/step - loss: 2.7480\n",
+      "Epoch 4/10\n",
+      "595/595 [==============================] - 193s 323ms/step - loss: 2.6126\n",
+      "Epoch 5/10\n",
+      "595/595 [==============================] - 193s 324ms/step - loss: 2.4960\n",
+      "Epoch 6/10\n",
+      "595/595 [==============================] - 193s 323ms/step - loss: 2.3850\n",
+      "Epoch 7/10\n",
+      "595/595 [==============================] - 193s 324ms/step - loss: 2.2945\n",
+      "Epoch 8/10\n",
+      "595/595 [==============================] - 193s 323ms/step - loss: 2.2044\n",
+      "Epoch 9/10\n",
+      "595/595 [==============================] - 193s 323ms/step - loss: 2.1196\n",
+      "Epoch 10/10\n",
+      "595/595 [==============================] - 193s 323ms/step - loss: 2.0332\n"
+     ]
+    },
+    {
+     "data": {
+      "text/plain": [
+       "<tensorflow.python.keras.callbacks.History at 0x7f50f09b8490>"
+      ]
+     },
+     "execution_count": 12,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "optimizer = tf.keras.optimizers.Adam()\n",
+    "#Loss\n",
+    "loss = tf.keras.losses.SparseCategoricalCrossentropy(\n",
+    "    from_logits=True, reduction='none')\n",
+    "\n",
+    "model.compile(loss=loss, optimizer=optimizer)\n",
+    "model.fit(dataset, epochs=10)\n",
+    "\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 22,
+   "id": "other-chancellor",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def generate_text(model, tokenizer, init_sentence=\"<start>\", max_len=20):\n",
+    "    # 테스트를 위해서 입력받은 init_sentence도 텐서로 변환합니다\n",
+    "    test_input = tokenizer.texts_to_sequences([init_sentence])\n",
+    "    test_tensor = tf.convert_to_tensor(test_input, dtype=tf.int64)\n",
+    "    end_token = tokenizer.word_index[\"<end>\"]\n",
+    "\n",
+    "    # 단어 하나씩 예측해 문장을 만듭니다\n",
+    "    #    1. 입력받은 문장의 텐서를 입력합니다\n",
+    "    #    2. 예측된 값 중 가장 높은 확률인 word index를 뽑아냅니다\n",
+    "    #    3. 2에서 예측된 word index를 문장 뒤에 붙입니다\n",
+    "    #    4. 모델이 <end>를 예측했거나, max_len에 도달했다면 문장 생성을 마칩니다\n",
+    "    while True:\n",
+    "        # 1\n",
+    "        predict = model(test_tensor) \n",
+    "        # 2\n",
+    "        predict_word = tf.argmax(tf.nn.softmax(predict, axis=-1), axis=-1)[:, -1] \n",
+    "        # 3 \n",
+    "        test_tensor = tf.concat([test_tensor, tf.expand_dims(predict_word, axis=0)], axis=-1)\n",
+    "        # 4\n",
+    "        if predict_word.numpy()[0] == end_token: break\n",
+    "        if test_tensor.shape[1] >= max_len: break\n",
+    "\n",
+    "    generated = \"\"\n",
+    "    # tokenizer를 이용해 word index를 단어로 하나씩 변환합니다 \n",
+    "    for word_index in test_tensor[0].numpy():\n",
+    "        generated += tokenizer.index_word[word_index] + \" \"\n",
+    "\n",
+    "    return generated"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 23,
+   "id": "infinite-richmond",
+   "metadata": {
+    "scrolled": true
+   },
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "'<start> i love you , i m not gonna crack <end> '"
+      ]
+     },
+     "execution_count": 23,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "generate_text(model, tokenizer, init_sentence=\"<start> i love\", max_len=20)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "gentle-insulation",
+   "metadata": {},
+   "source": [
+    "회고\n",
+    "-----"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "limited-crystal",
+   "metadata": {},
+   "source": [
+    "- 학습 데이터 갯수가 124960개 보다 적어야한다 했으나 14만개정도가 나와서 정제 과정을 계속 보다가<br/>길이가 55이상인 문장들은 건너뛰게 설정하였더니 (30,40,50,55로 늘려갔다) 갯수가 121872개로 충족되었다.<br/>"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "noticed-marble",
+   "metadata": {},
+   "source": [
+    "- 문장을 토큰화 했을 때 토큰의 개수가 15개를 넘어가는 문장을 학습 데이터에서 제외해야한다해서<br/> 주석에 달린 pad_sequences 페이지를 참고하여 maxlen의 수치를 15로 맞춰주었다."
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.7.9"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
